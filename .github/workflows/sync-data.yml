@@ -1,0 +1,101 @@
+name: 同步上游题库
+
+# 题库来自 xiaoyang111222/cn-math-taxonomy（作者持续在补内容）。
+# 我们只取 data/topics.json 与 data/dependencies.json 两份，
+# 且只保留渲染/诊断需要的字段 —— 上游 5.8MB 的 questions.json 不取，
+# 每个知识点自带的 diagnostic_question 已经够用。
+#
+# ★ 与 gdpy 的同步约束一样：更新前先跑校验，不过就不更新。
+#   题库坏了 = 整个站点开天窗，宁可停在旧版。
+
+on:
+  schedule:
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 拉上游并生成精简数据
+        run: |
+          set -e
+          BASE=https://raw.githubusercontent.com/xiaoyang111222/cn-math-taxonomy/main/data
+          curl -fsSL -o /tmp/topics.json "$BASE/topics.json"
+          curl -fsSL -o /tmp/deps.json "$BASE/dependencies.json"
+          node - <<'JS'
+          const fs = require('fs');
+          const topics = JSON.parse(fs.readFileSync('/tmp/topics.json', 'utf8'));
+          const deps = JSON.parse(fs.readFileSync('/tmp/deps.json', 'utf8'));
+          if (!Array.isArray(topics) || topics.length < 1000) throw new Error('topics 数量异常: ' + topics.length);
+          if (!Array.isArray(deps) || deps.length < 1000) throw new Error('dependencies 数量异常: ' + deps.length);
+          // 只保留界面与诊断必需的字段
+          const keep = ['id','name','grade','semester','chapter','domain','type','description','mastery_criteria','diagnostic_question','external'];
+          const slim = topics.map(t => { const o = {}; keep.forEach(k => { if (k in t) o[k] = t[k]; }); return o; });
+          fs.mkdirSync('data', { recursive: true });
+          fs.writeFileSync('data/topics.json', JSON.stringify(slim));
+          fs.writeFileSync('data/dependencies.json', JSON.stringify(deps));
+          console.log('topics', slim.length, 'deps', deps.length);
+          JS
+
+      - name: 校验（数据 + 引擎 + 分享码）
+        run: |
+          set -e
+          node --check assets/app.js
+          node --check assets/share.js
+          node - <<'JS'
+          const E = require('./assets/engine.js');
+          const topics = require('./data/topics.json');
+          const deps = require('./data/dependencies.json');
+          const g = E.buildGraph(topics, deps);
+          // ★ 真正的可用性校验：拿真实数据跑一次诊断，
+          //   能出题、能判分、能出报告，才算这份数据能用。
+          //   只看 JSON 能不能 parse 是不够的。
+          let asked = 0, sess = E.createSession(g, topics.slice(0, 30).map(t => t.id), { limit: 6 });
+          while (asked < 6) {
+            const it = E.nextItem(g, sess);
+            if (!it) break;
+            const jd = E.judgeQuestion(it.question, it.question.answer);
+            if (jd.verdict !== 'correct') throw new Error('判分异常: ' + JSON.stringify(jd));
+            sess = E.applyAnswer(g, sess, it.topicId, 'correct', { text: '' });
+            asked++;
+          }
+          if (asked === 0) throw new Error('一道题都出不出来');
+          const sum = E.summarize(g, sess);
+          if (!sum || typeof sum.asked !== 'number') throw new Error('summarize 结果异常');
+          // byId 必须能取到名字（这里曾经踩过：误用 index 导致全部 undefined）
+          const one = Object.keys(sess.status)[0];
+          if (one && !g.byId[one]) throw new Error('byId 取不到知识点: ' + one);
+          console.log('校验通过：出题', asked, '道，知识点', topics.length, '依赖', deps.length);
+          JS
+
+      - name: 提交
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          if git diff --staged --quiet; then echo "题库无变化"; exit 0; fi
+          git commit -m "data: 同步上游题库"
+          git push origin HEAD:main
+
+      - name: 失败则提 issue（不更新）
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '⚠️ 题库同步被拦下（未更新）',
+              body: '上游题库同步时校验未通过，data/ **没有更新**，站点仍用旧版数据。\n\n请查看 Actions 日志确认是上游数据问题还是裁剪脚本要改。',
+              labels: ['data-sync']
+            });

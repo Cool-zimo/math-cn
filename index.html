@@ -9,71 +9,211 @@
 <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
-<div id="bar"></div>
+<div class="app">
 
-<div class="wrap">
-  <div class="top">
-    <div class="brand" id="home"><span class="dot"></span>学情诊断</div>
-    <div class="right">
-      <button class="linkbtn" id="btn-about">说明</button>
-      <button class="linkbtn" id="btn-ac">登录</button>
-    </div>
-  </div>
-
-  <!-- 加载 -->
-  <div class="view on" id="v-load">
-    <div class="loading"><div class="spin"></div>正在准备题库…</div>
-  </div>
-
-  <!-- 开始 -->
-  <div class="view" id="v-home">
-    <div class="hero">
-      <h1>先找到卡在哪，<br>再决定练什么。</h1>
-      <p>选一个章节做几道题。答错会顺着先修关系往回追，直到找到真正不会的那个点。</p>
+  <!-- ===== 侧边栏 ===== -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span class="sidebar-logo">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 17l5-5 4 3 5-7 4 4"></path>
+          <circle cx="8" cy="12" r="1.6"></circle>
+          <circle cx="17" cy="8" r="1.6"></circle>
+        </svg>
+      </span>
+      <span class="sidebar-title">学情诊断</span>
+      <button class="sb-close" id="sb-close" aria-label="关闭菜单">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"></path></svg>
+      </button>
     </div>
 
-    <div class="sect">
-      <div class="lbl">科目</div>
-      <div class="subs" id="subs"></div>
-    </div>
-
-    <div class="sect">
-      <div class="lbl">年级</div>
-      <div class="grades" id="grades"></div>
-    </div>
-
-    <div class="sect" id="sect-chap" style="display:none">
-      <div class="lbl">章节</div>
-      <div class="chaps" id="chaps"></div>
-    </div>
-
-    <div class="cta">
-      <button class="btn" id="btn-start" disabled>开始诊断</button>
-      <div class="hint" id="hint">先选科目和年级</div>
-    </div>
-  </div>
-
-  <!-- 答题 -->
-  <div class="view" id="v-quiz">
-    <div class="qwrap">
-      <div class="qmeta">
-        <span id="q-prog">第 1 题</span>
-        <span class="chip" id="q-topic"></span>
+    <nav class="sidebar-nav">
+      <div class="nav-section">
+        <div class="nav-section-title">学习</div>
+        <a class="nav-item" href="#/home" data-view="home">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="4"></circle><circle cx="12" cy="12" r="1"></circle></svg></span>
+          <span>开始诊断</span>
+        </a>
       </div>
-      <div class="qcard">
-        <div class="qtopic" id="q-from"></div>
-        <div class="qtext" id="q-text"></div>
-        <div id="q-input"></div>
-        <div class="acts" id="q-acts"></div>
-        <div id="q-fb"></div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">我的</div>
+        <a class="nav-item" href="#/records" data-view="records">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V11"></path><path d="M10 20V4"></path><path d="M16 20v-6"></path><path d="M21 20H3"></path></svg></span>
+          <span>学情记录</span>
+          <span class="nav-badge" id="nav-badge-rec" hidden>0</span>
+        </a>
+        <a class="nav-item" href="#/mind" data-view="mind">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="2.4"></circle><circle cx="19" cy="6" r="2.4"></circle><circle cx="19" cy="18" r="2.4"></circle><path d="M7.4 12h3.3c1.2 0 1.8-.6 2.2-1.6l1.6-3"></path><path d="M7.4 12h3.3c1.2 0 1.8.6 2.2 1.6l1.6 3"></path></svg></span>
+          <span>思维导图</span>
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">账户</div>
+        <a class="nav-item" href="#/account" data-view="account">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-1.5A4.5 4.5 0 0 0 15.5 15h-7A4.5 4.5 0 0 0 4 19.5V21"></path><circle cx="12" cy="8" r="3.6"></circle></svg></span>
+          <span>账号</span>
+        </a>
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-info" id="sb-user" title="在账号页里改昵称">
+        <span class="avatar" id="sb-avatar">学</span>
+        <span class="u-txt"><span class="user-name" id="sb-name">学习者</span><span class="user-login" id="sb-sub">本地账号</span></span>
       </div>
     </div>
-  </div>
+  </aside>
+  <div class="sidebar-overlay" id="overlay"></div>
 
-  <!-- 报告 -->
-  <div class="view" id="v-report">
-    <div class="rwrap" id="report"></div>
-  </div>
+  <!-- ===== 主区 ===== -->
+  <main class="main">
+    <div class="toolbar">
+      <button class="icon-btn sb-toggle" id="sb-toggle" aria-label="菜单">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"></path></svg>
+      </button>
+      <div class="crumb" id="crumb">开始诊断</div>
+      <div class="tb-right">
+        <button class="icon-btn" id="btn-about" aria-label="说明">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 16.5v-5"></path><path d="M12 8.2h.01"></path></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="content" id="content">
+      <div id="bar"></div>
+
+      <!-- 加载 -->
+      <div class="view on" id="v-load">
+        <div class="loading"><div class="spin"></div>正在准备题库…</div>
+      </div>
+
+      <!-- 诊断首页 -->
+      <div class="view" id="v-home">
+        <div class="hero">
+          <h1>先找到卡在哪，<br>再决定练什么。</h1>
+          <p>选一个章节做几道题。答错会顺着先修关系往回追，直到找到真正不会的那个点。</p>
+        </div>
+
+        <div class="sect">
+          <div class="lbl">科目</div>
+          <div class="subs" id="subs"></div>
+        </div>
+
+        <div class="sect">
+          <div class="lbl">年级</div>
+          <div class="grades" id="grades"></div>
+        </div>
+
+        <div class="sect" id="sect-chap" style="display:none">
+          <div class="lbl">章节</div>
+          <div class="chaps" id="chaps"></div>
+        </div>
+
+        <div class="cta">
+          <button class="btn" id="btn-start" disabled>开始诊断</button>
+          <div class="hint" id="hint">先选科目和年级</div>
+        </div>
+      </div>
+
+      <!-- 答题 -->
+      <div class="view" id="v-quiz">
+        <div class="qwrap">
+          <div class="qmeta">
+            <span id="q-prog">第 1 题</span>
+            <span class="chip" id="q-topic"></span>
+          </div>
+          <div class="qcard">
+            <div class="qtopic" id="q-from"></div>
+            <div class="qtext" id="q-text"></div>
+            <div id="q-input"></div>
+            <div class="acts" id="q-acts"></div>
+            <div id="q-fb"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 报告 -->
+      <div class="view" id="v-report">
+        <div class="rwrap" id="report"></div>
+      </div>
+
+      <!-- 学情记录 -->
+      <div class="view" id="v-records">
+        <div class="page-head">
+          <h2>我的学情记录</h2>
+          <p class="cap">每次诊断结束会自动存到这里，只保存在你自己的浏览器里。</p>
+        </div>
+        <div id="rec-list"></div>
+      </div>
+
+      <!-- 思维导图 -->
+      <div class="view" id="v-mind">
+        <div class="page-head">
+          <h2>思维导图</h2>
+          <p class="cap">选一个章节，看知识点之间的先修关系。箭头指向「需要先学会的」。</p>
+        </div>
+        <div class="mind-bar">
+          <select id="m-subj" class="sel"></select>
+          <select id="m-grade" class="sel"></select>
+          <select id="m-chap" class="sel"></select>
+        </div>
+        <div class="mind-legend">
+          <span><i class="d mastered"></i>已掌握</span>
+          <span><i class="d shaky"></i>不稳</span>
+          <span><i class="d weak"></i>薄弱</span>
+          <span><i class="d unknown"></i>未测</span>
+        </div>
+        <div class="mind-wrap" id="mind"></div>
+      </div>
+
+      <!-- 账号 -->
+      <div class="view" id="v-account">
+        <div class="page-head">
+          <h2>账号</h2>
+          <p class="cap">本地账号，不需要注册。换设备或清缓存会丢失，重要报告记得生成分享链接。</p>
+        </div>
+
+        <div class="card">
+          <div class="ac-row">
+            <span class="avatar lg" id="ac-avatar">学</span>
+            <div class="ac-fld">
+              <label for="ac-name">昵称</label>
+              <input id="ac-name" class="inp" maxlength="16" placeholder="给自己起个名字">
+            </div>
+          </div>
+          <div class="ac-note" id="ac-note">改完自动保存</div>
+        </div>
+
+        <div class="card">
+          <h3>学习概览</h3>
+          <div class="stats" id="ac-stats"></div>
+        </div>
+
+        <div class="card">
+          <h3>外观</h3>
+          <div class="opt-row">
+            <div class="bd"><div class="nm">深色模式</div><div class="ds" id="th-ds">跟随系统</div></div>
+            <div class="seg" id="th-seg">
+              <button data-th="auto" class="on">跟随</button>
+              <button data-th="light">浅色</button>
+              <button data-th="dark">深色</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card danger">
+          <h3>数据</h3>
+          <p class="cap">清空后无法恢复。</p>
+          <div class="acts">
+            <button class="btn sm ghost" id="ac-export">导出记录</button>
+            <button class="btn sm danger" id="ac-clear">清空学情记录</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
 </div>
 
 <div class="toast" id="toast"></div>

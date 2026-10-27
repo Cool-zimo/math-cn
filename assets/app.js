@@ -233,7 +233,11 @@
 
         /* 层内折行：大章节单层摊开会横向拉到几千像素，
            纵向折行更好读。PER 是每行列数，ROWH 是折出来的行高。 */
-        var COL = 128, ROW = 96, ROWH = 58, PER = 6, PAD = 30;
+        /* 手机上按 3 列折行：6 列会把图撑到 572px 宽，容器只有 358px，
+           只能横向拖着看。竖着排虽然高一点，但至少是上下滚，不用歪着头拖。 */
+        var narrow = window.innerWidth <= 768;
+        var COL = narrow ? 104 : 128, ROW = 96, ROWH = narrow ? 52 : 58,
+            PER = narrow ? 3 : 6, PAD = 30;
         var maxN = 0;
         Ls.forEach(function (L) {
             var r = Math.ceil(byL[L].length / PER);
@@ -273,7 +277,8 @@
         var fill = { mastered: '#15803d', shaky: '#b45309', weak: '#b91c1c', unknown: '#c8cfd8' };
         var opa = { mastered: 1, shaky: 1, weak: 1, unknown: .5 };
 
-        var svg = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">' +
+        var svg = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H +
+            '" style="max-width:100%;height:auto">' +
             '<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" ' +
             'orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor" opacity=".55"></path></marker></defs>';
 
@@ -372,6 +377,7 @@
             // 报告链接优先：带着 #r/xxx 进来的人要看的是报告
             if (code) { return openShared(code); }
             renderHome();
+            restoreLast();
             route();
         }).catch(function (e) {
             $('v-load').innerHTML = '<div class="empty">题库加载失败：' + esc(e.message) +
@@ -411,6 +417,9 @@
         }).join('');
         box.querySelectorAll('.sub').forEach(function (el) {
             el.onclick = function () { pickSubj(el.getAttribute('data-s')); };
+            /* 补回选中态：原先只有点击时才加 on，而从别的页切回来会整个重渲染，
+               结果「开始诊断」明明可点，科目却一个都没高亮——看着像坏了。 */
+            if (S.subj && el.getAttribute('data-s') === S.subj) el.classList.add('on');
         });
         if (!S.subj) {
             $('grades').innerHTML = '';
@@ -449,6 +458,7 @@
             (map[c] = map[c] || []).push(t.id);
         });
         var chaps = Object.keys(map);
+        S.chapMap = map;
         $('chaps').innerHTML = chaps.map(function (c, i) {
             return '<button class="ch" data-c="' + esc(c) + '">' +
                 '<span class="idx">' + (i + 1) + '</span>' +
@@ -456,19 +466,50 @@
                 '<span class="ct">' + map[c].length + '</span></button>';
         }).join('');
         $('chaps').querySelectorAll('.ch').forEach(function (el) {
-            el.onclick = function () { pickChap(el.getAttribute('data-c'), map); };
+            el.onclick = function () { pickChap(el.getAttribute('data-c')); };
         });
         $('sect-chap').style.display = chaps.length ? 'block' : 'none';
         if (!chaps.length) $('chaps').innerHTML = '<div class="empty">该年级暂无数据</div>';
+        if (S.chap && map[S.chap]) {
+            $('chaps').querySelectorAll('.ch').forEach(function (e) {
+                e.classList.toggle('on', e.getAttribute('data-c') === S.chap);
+            });
+        }
         updateCta();
     }
 
-    function pickChap(c, map) {
-        S.chap = c; S.chapIds = map[c];
+    function pickChap(c) {
+        S.chap = c; S.chapIds = (S.chapMap || {})[c] || [];
         $('chaps').querySelectorAll('.ch').forEach(function (e) {
             e.classList.toggle('on', e.getAttribute('data-c') === c);
         });
         updateCta();
+        saveLast();
+        /* 选完最后一步，「开始诊断」还留在 1435px 处，手机上得再滚一屏多才看得见。
+           选完就把它送到眼前——顺手把章节列表收起，省得挡着。 */
+        var cta = document.querySelector('.cta');
+        if (cta && cta.scrollIntoView) {
+            try { cta.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
+        }
+    }
+
+    /* ---------------- 记住上次的选择 ----------------
+       每次进来都要重新点三下是最磨人的。存下来，下次直接就位。 */
+    var SK = 'mathcn_last_v1';
+    function saveLast() {
+        if (!(S.subj && S.grade && S.chap)) return;
+        try { localStorage.setItem(SK, JSON.stringify({ s: S.subj, g: S.grade, c: S.chap })); } catch (e) {}
+    }
+    function loadLast() {
+        try { return JSON.parse(localStorage.getItem(SK)); } catch (e) { return null; }
+    }
+    function restoreLast() {
+        var l = loadLast();
+        if (!l || !l.s) return false;
+        pickSubj(l.s);
+        if (l.g && $('grades').querySelector('[data-g="' + l.g + '"]')) pickGrade(l.g);
+        if (l.c && (S.chapMap || {})[l.c]) pickChap(l.c);
+        return !!(S.subj && S.grade && S.chap);
     }
 
     function updateCta() {
@@ -480,6 +521,7 @@
     }
 
     function start() {
+        saveLast();
         S.session = E.createSession(S.graph, S.chapIds.slice(), { limit: LIMIT });
         S.answered = 0;
         $('bar').style.width = '0%';
@@ -487,14 +529,107 @@
         nextQ();
     }
 
+    /* ---------------- 选项生成 ----------------
+       题库 2313 题全是填空（question + answer，没有一道自带 options）。
+       手机上每题都要敲键盘是最劝退的一步，所以这里给合适的题补上选项。
+       只挑「干扰项说得通」的题：数字答案配邻近值，短文本配同章答案。
+       挑不出来就老老实实填空，绝不硬凑一个一眼假的错误项。 */
+    function alike(a, b) {
+        var ha = /[\u4e00-\u9fa5]/.test(a), hb = /[\u4e00-\u9fa5]/.test(b);
+        if (ha !== hb) return false;                       // 中英不混
+        // 一方带数字/字母、另一方是纯汉字，摆在一起很扎眼
+        // （「分子势能最小」旁边放「4/3 倍」，谁都能看出哪个是凑的）
+        if (/[0-9A-Za-z]/.test(a) !== /[0-9A-Za-z]/.test(b)) return false;
+        var la = a.length, lb = b.length;
+        if (la && lb) {
+            var r = la > lb ? la / lb : lb / la;
+            if (r > 2.4) return false;                     // 长短差太多也不像
+        }
+        return true;
+    }
+
+    function genOpts(q, topicId) {
+        var a = String(q.answer == null ? '' : q.answer).trim();
+        if (!a) return null;
+        var pool = [];
+        if (/^-?\d+(\.\d+)?$/.test(a)) {
+            // 数学题的错解基本都差一点点，邻近值就是最好的干扰项
+            var n = parseFloat(a);
+            [n + 1, n - 1, n + 2, n - 2, n + 10, n - 10, n * 2, n + 5]
+                .concat(n === 0 ? [] : [Math.round(n / 2)])
+                .forEach(function (x) {
+                    if (!isFinite(x)) return;
+                    var s = String(Math.round(x * 100) / 100);
+                    // 小数答案只配小数干扰项，混进整数反而暴露答案
+                    if (a.indexOf('.') >= 0 && s.indexOf('.') < 0) return;
+                    if (s !== a && pool.indexOf(s) < 0) pool.push(s);
+                });
+        } else if (a.length <= 40) {
+            /* 同章其它题的答案。题库里有 648 道题干写着「下列哪一句/哪一个正确」，
+               却只存了正确选项没有干扰项——同章采来的正好就是同类的说法，
+               质量和人工出的选择项接近。采不到就退回填空，不硬凑。 */
+            var t = S.graph.byId[topicId];
+            var ch = t ? t.chapter : '', g = t ? t.grade : null, sj = t ? subjOf(t.id) : null;
+            /* 三级兜底：同章 → 同年级同学科 → 同学科。
+               章节切得很细（有的章只有两三个知识点），只盯同章会采不满，
+               结果明明是「下列哪一句正确」，却只能让用户打字。 */
+            var tiers = [
+                function (x) { return ch && x.chapter === ch; },
+                function (x) { return x.grade === g && subjOf(x.id) === sj; },
+                function (x) { return subjOf(x.id) === sj; }
+            ];
+            var cand = [];
+            tiers.forEach(function (fit) {
+                if (cand.length >= 3) return;
+                var got = [];
+                S.topics.forEach(function (x) {
+                    if (got.length >= 3 || !fit(x)) return;
+                    var b = String((x.diagnostic_question || {}).answer || '').trim();
+                    if (!b || b === a || b.length > 40) return;
+                    if (!alike(a, b)) return;
+                    if (got.indexOf(b) >= 0 || cand.indexOf(b) >= 0) return;
+                    got.push(b);
+                });
+                // 先挑长度最接近的，读起来最像同一道题的选项
+                got.sort(function (x, y) {
+                    return Math.abs(x.length - a.length) - Math.abs(y.length - a.length);
+                });
+                cand = cand.concat(got.slice(0, 3 - cand.length));
+            });
+            pool = cand.slice(0, 3);
+        }
+        if (pool.length < 2) return null;
+        var opts = [a].concat(pool.slice(0, 3));
+        // 洗牌：正确答案不能总待在同一个位置
+        for (var i = opts.length - 1; i > 0; i--) {
+            var j = Math.floor(Math.random() * (i + 1));
+            var tmp = opts[i]; opts[i] = opts[j]; opts[j] = tmp;
+        }
+        return opts;
+    }
+
+    function advance() {
+        clearTimeout(S.autoT);
+        if (S.answered >= LIMIT || !E.nextItem(S.graph, S.session)) finish();
+        else nextQ();
+    }
+
     /* ---------------- 答题 ---------------- */
     function nextQ() {
+        clearTimeout(S.autoT);
         S.item = E.nextItem(S.graph, S.session);
         if (!S.item) { finish(); return; }
 
         var t = S.graph.byId[S.item.topicId];
         $('q-prog').textContent = '第 ' + (S.answered + 1) + ' 题 / 最多 ' + LIMIT;
         $('q-topic').textContent = t ? t.name : '';
+        /* 答错后引擎会给同一知识点第二次机会，但题库每个点只存了一道题，
+           于是题面字面完全一样——不明说的话，用户会以为页面卡住了。 */
+        var again = S.item.topicId === S.lastTopic;
+        var tag = $('q-again');
+        if (again) { if (!tag) { $('q-topic').insertAdjacentHTML('afterend', '<span class="chip again" id="q-again">再确认一次</span>'); } }
+        else if (tag) { tag.remove(); }
+        S.lastTopic = S.item.topicId;
         $('q-from').textContent = t ? (t.chapter || '') : '';
         $('q-text').textContent = S.item.question.prompt;
 
@@ -503,8 +638,9 @@
         $('q-fb').innerHTML = '';
         S.manual = false;
 
-        if (q.options && q.options.length) {
-            box.innerHTML = '<div class="opts">' + q.options.map(function (o) {
+        var opts = (q.options && q.options.length) ? q.options : genOpts(q, S.item.topicId);
+        if (opts && opts.length) {
+            box.innerHTML = '<div class="opts">' + opts.map(function (o) {
                 return '<button class="opt" data-o="' + esc(o) + '">' + esc(o) + '</button>';
             }).join('') + '</div>';
             box.querySelectorAll('.opt').forEach(function (b) {
@@ -512,7 +648,13 @@
             });
             acts.innerHTML = '<button class="btn minor" id="q-skip">不会，跳过</button>';
         } else {
-            box.innerHTML = '<input class="ans" id="q-ans" placeholder="填写答案，回车提交" autocomplete="off">';
+            // 数字答案直接给数字键盘，别让人在手机上切输入法
+            var ans = String(q.answer == null ? '' : q.answer).trim();
+            var numeric = /^-?\d+(\.\d+)?$/.test(ans);
+            box.innerHTML = '<input class="ans" id="q-ans" ' +
+                (numeric ? 'inputmode="' + (ans.indexOf('.') >= 0 ? 'decimal' : 'numeric') + '" ' : '') +
+                'placeholder="' + (numeric ? '填数字，回车提交' : '填写答案，回车提交') +
+                '" autocomplete="off">';
             acts.innerHTML = '<button class="btn" id="q-ok">提交</button>' +
                 '<button class="btn minor" id="q-skip">不会</button>';
             var inp = $('q-ans');
@@ -537,6 +679,7 @@
         S.manual = true;
         $('q-fb').innerHTML =
             '<div class="fb"><b>这题需要你自己判断</b>' +
+            '<span class="why">你填的是：' + esc(String(text || '').trim() || '（空）') + '</span>' +
             '<span class="why">参考答案：' + esc(S.item.question.answer) + '</span>' +
             '<div class="acts" style="margin-top:12px">' +
             '<button class="btn sm" id="mf-ok">我答对了</button>' +
@@ -554,13 +697,17 @@
         $('q-fb').innerHTML = '<div class="fb ' + (ok ? 'ok' : 'no') + '">' +
             (ok ? '答对了' : (verdict === 'skip' || text === '' ? '已跳过' : '答错了')) +
             (why ? '<span class="why">' + esc(why) + '</span>' : '') + '</div>';
+        var last = S.answered >= LIMIT || !E.nextItem(S.graph, S.session);
         $('q-acts').innerHTML = '<button class="btn" id="q-next">' +
-            (S.answered >= LIMIT ? '看报告' : '下一题') + '</button>';
-        $('q-next').onclick = function () {
-            if (S.answered >= LIMIT || !E.nextItem(S.graph, S.session)) finish();
-            else nextQ();
-        };
+            (last ? '看报告' : '下一题') + '</button>';
+        $('q-next').onclick = advance;
         bar();
+        /* 答完自动往下走，省掉一次点击。
+           答对停 1.2 秒（够看清对错），答错停 2.6 秒（够读完解析），
+           自己判分的停 2.2 秒。想快进就戳「下一题」，定时器会被 advance 清掉。 */
+        var wait = ok ? 1200 : 2600;
+        if (jd && jd.reason === 'self') wait = 2200;
+        S.autoT = setTimeout(advance, wait);
     }
 
     function bar() {
@@ -691,7 +838,8 @@
                 '<p class="cap">链接里就带着结果，对方打开直接看到这份报告</p>' +
                 '<button class="btn sm" id="r-share">生成链接</button>' +
                 '<div id="r-link"></div>' +
-                '<div style="margin-top:14px"><button class="linkbtn" id="r-print">打印 / 存为 PDF</button></div>';
+                '<div style="margin-top:14px"><button class="btn sm ghost" id="r-again">再测一次</button> ' +
+                '<button class="linkbtn" id="r-print">打印 / 存为 PDF</button></div>';
         } else {
             html += '<p class="cap" style="margin:0">这是一份分享来的报告</p>' +
                 '<div style="margin-top:14px"><button class="btn sm ghost" id="r-mine">我也测一下</button> ' +
@@ -719,6 +867,11 @@
                 bs.textContent = '重新生成';
                 bs.disabled = false;
             }).catch(function (e) { toast('生成失败：' + e.message); bs.disabled = false; bs.textContent = '生成链接'; });
+        };
+        var ba = $('r-again');
+        if (ba) ba.onclick = function () {
+            if (!S.chapIds || !S.chapIds.length) { go('home'); return; }
+            start();
         };
         var bm = $('r-mine');
         if (bm) bm.onclick = function () { location.hash = ''; renderHome(); view('v-home'); };
@@ -788,6 +941,15 @@
         $('sb-user').onclick = function () { if (isMobile()) sbOpen(false); go('account'); };
 
         window.addEventListener('hashchange', function () { route(); });
+
+        // 转屏 / 改窗口后导图要重排，否则手机上会留着桌面算出来的 6 列宽图
+        var rzT;
+        window.addEventListener('resize', function () {
+            clearTimeout(rzT);
+            rzT = setTimeout(function () {
+                if ($('v-mind').classList.contains('on')) drawMind();
+            }, 200);
+        });
 
         // 诊断
         $('btn-start').onclick = start;

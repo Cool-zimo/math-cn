@@ -52,6 +52,17 @@
         var m = /^(cnm|cnc|cne|cnp)/.exec(id || '');
         return m ? m[1] : 'cnm';
     }
+    /* ★ 章节粒度：原始 chapter 细到「1.1」小节，一个章平均只有 1.9 个知识点，
+     *   选进去答一题就结束了，报告也没内容可看。
+     *   去掉末尾的纯数字小节号后，平均 7 点/章 —— 一次诊断才有意义。
+     *   只砍末尾是数字编号的段（"有理数 1.1"），像
+     *   "5以内数的认识和加、减法" 这种本来就不是编号的，原样保留。 */
+    function normChapter(c) {
+        var a = String(c || '').split(/\s+/);
+        if (a.length > 1 && /^[\d.]+$/.test(a[a.length - 1])) a.pop();
+        return a.join(' ');
+    }
+
     function gradeName(g) {
         var n = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
         if (g >= 1 && g <= 6) return n[g] + '年级';
@@ -127,7 +138,7 @@
         var map = {};
         S.topics.forEach(function (t) {
             if (subjOf(t.id) !== S.subj || t.grade !== g) return;
-            var c = t.chapter || '其他';
+            var c = normChapter(t.chapter) || '其他';
             (map[c] = map[c] || []).push(t.id);
         });
         var chaps = Object.keys(map);
@@ -174,7 +185,7 @@
         S.item = E.nextItem(S.graph, S.session);
         if (!S.item) { finish(); return; }
 
-        var t = S.graph.index[S.item.topicId];
+        var t = S.graph.byId[S.item.topicId];
         $('q-prog').textContent = '第 ' + (S.answered + 1) + ' 题 / 最多 ' + LIMIT;
         $('q-topic').textContent = t ? t.name : '';
         $('q-from').textContent = t ? (t.chapter || '') : '';
@@ -304,10 +315,14 @@
         });
 
         var html = '';
+        // ★ 题数必须写出来。自适应诊断答对就跳过所有先修，
+        //   可能只问 1 题就得出"掌握度 100%"。不写题数的话，
+        //   这个 100% 看着像测了整套卷子，其实是测了一道题。
         html += '<div class="rhead"><h2>学习报告</h2><div class="sub2">' +
             esc([SUBJ[rep.subject] ? SUBJ[rep.subject].name : '', rep.grade, rep.chapter]
                 .filter(Boolean).join(' · ')) +
-            (rep.ts ? ' · ' + new Date(rep.ts).toLocaleDateString('zh-CN') : '') + '</div></div>';
+            (rep.ts ? ' · ' + new Date(rep.ts).toLocaleDateString('zh-CN') : '') +
+            (rep.asked ? ' · 做了 ' + rep.asked + ' 道题' : '') + '</div></div>';
 
         html += '<div class="ring"><svg width="140" height="140" viewBox="0 0 140 140">' +
             '<circle cx="70" cy="70" r="' + R + '" fill="none" stroke="#f0f2f5" stroke-width="15"/>' +
@@ -329,7 +344,7 @@
             html += '<div class="card"><h3>最该先补的</h3>' +
                 '<p class="cap">它们是这一章里最靠前的薄弱点，后面的内容都压在上面</p><div class="steps">';
             roots.slice(0, 6).forEach(function (r, i) {
-                var t = S.graph.index[r.id];
+                var t = S.graph.byId[r.id];
                 html += '<div class="step"><span class="no w">' + (i + 1) + '</span>' +
                     '<div class="bd"><div class="nm">' + esc(t ? t.name : r.id) + '</div>' +
                     '<div class="ds">' + esc(t ? (t.chapter || '') : '') + '</div></div>' +
@@ -343,7 +358,7 @@
             html += '<div class="card"><h3>建议的练习顺序</h3>' +
                 '<p class="cap">按年级从低到高、先修在前排列，共 ' + path.length + ' 个知识点</p><div class="steps">';
             path.slice(0, 20).forEach(function (p, i) {
-                var t = S.graph.index[p.id];
+                var t = S.graph.byId[p.id];
                 var cls = ST_CLS[p.status] || 'u';
                 html += '<div class="step"><span class="no ' + cls + '">' + (i + 1) + '</span>' +
                     '<div class="bd"><div class="nm">' + esc(t ? t.name : p.id) +
@@ -407,7 +422,7 @@
         var pos = {};
         S.topics.forEach(function (t, i) { pos[t.id] = i; });
         return ids.sort(function (a, b) {
-            var ta = S.graph.index[a], tb = S.graph.index[b];
+            var ta = S.graph.byId[a], tb = S.graph.byId[b];
             return ((ta ? ta.grade : 99) - (tb ? tb.grade : 99)) || (pos[a] - pos[b]);
         }).map(function (i) {
             var c = rep.states[i];

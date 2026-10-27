@@ -402,6 +402,7 @@ body.dark-mode .sub.on .badge { background: rgba(255, 255, 255, .08); color: var
   background: var(--bg-tertiary); border-radius: 20px;
   padding: 2px 10px; font-size: 12px;
 }
+.chip.again { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
 .qcard {
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
@@ -595,6 +596,30 @@ body.dark-mode .sub.on .badge { background: rgba(255, 255, 255, .08); color: var
 
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+
+/* ===== 实用性打磨 =====
+   1) 手机上「开始诊断」吸底：选完章节后它原本停在 1435px 处，
+      不吸底就得再滚一屏多才找得到。
+   2) 选项做成 44px 的触摸条，手指点得准。 */
+@media (max-width: 768px) {
+  .cta {
+    position: sticky;
+    bottom: 0;
+    z-index: 6;
+    margin-top: 18px;
+    padding: 10px 0 16px;
+    background: var(--bg-secondary);
+  }
+  .cta::before {
+    content: "";
+    position: absolute; left: 0; right: 0; top: -22px; height: 22px;
+    background: linear-gradient(to top, var(--bg-secondary), transparent);
+    pointer-events: none;
+  }
+  .cta .btn { width: 100%; padding: 13px 18px; font-size: 15px; }
+  .opt { min-height: 44px; display: flex; align-items: center; font-size: 15px; }
+  .ans { font-size: 16px; padding: 13px 14px; }
 }
 
 @media print {

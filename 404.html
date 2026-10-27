@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>学情诊断</title>
+<script>
+/* ★ 为什么需要这个文件：
+ *   GitHub Pages 是静态托管，/r/<报告码> 这个路径并不真实存在。
+ *   直接访问会 404 —— 而 Pages 会把 404 交给这个文件处理。
+ *   所以这里做的唯一一件事就是：认出报告码，转交给 index.html 去渲染。
+ *
+ * ★ 为什么转发成 #r/ 而不是自己渲染：
+ *   报告渲染逻辑只在 index.html 里维护一份。如果 404.html 也写一套，
+ *   改样式时就要改两处，必然漂移。
+ *
+ * ★ 为什么用 replace 而不是 href：
+ *   replace 不留历史记录，用户点返回不会卡在这个中转页上。
+ */
+(function () {
+    var m = /(?:^|\/)r\/(R1[cp][\w-]*)/.exec(location.pathname);
+    if (!m) { location.replace('./'); return; }
+    var i = location.pathname.indexOf('/r/');
+    var base = i > 0 ? location.pathname.slice(0, i) : '';
+    location.replace(base + '/#r/' + m[1]);
+})();
+</script>
+</head>
+<body></body>
+</html>

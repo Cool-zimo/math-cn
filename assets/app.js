@@ -202,8 +202,83 @@
         drawMind();
     }
 
+    /* ---------------- 思维导图 ----------------
+     * 画布 = 一个可缩放/平移的图层（#mind-canvas）+ 浮在上面的控制条。
+     *
+     * ★ 为什么缩放做在 transform 上，而不是改 SVG 的 viewBox：
+     *   viewBox 放大会把 stroke 宽度和字号一起放大 —— 放到 3 倍时线和字
+     *   一起变粗发糊，像图片被拉花。transform: scale 只放大像素，
+     *   交给 GPU 合成，拖动也更跟手。
+     *
+     * ★ 为什么 fit 的上限是 1.15 而不是 2：
+     *   小章节本来就没几个节点，硬拉到 2 倍只是把字放大，信息量一点没多，
+     *   反而显得空。超过原始尺寸的放大没有意义。
+     */
+
+    var MZ = { s: 1, x: 0, y: 0 };
+
+    function mindApply() {
+        var c = $('mind-canvas');
+        if (!c) return;
+        c.style.transform = 'translate(' + MZ.x + 'px,' + MZ.y + 'px) scale(' + MZ.s + ')';
+        var z = $('mind-zoom');
+        if (z) z.textContent = Math.round(MZ.s * 100) + '%';
+    }
+
+    /* 以 (cx,cy) 为锚点缩放：缩放前后，锚点下的那个内容点落在同一屏幕位置。
+     *   屏幕点 = 平移 + 缩放 × 内容点  ⇒  内容点 = (屏幕点 − 平移) / 缩放
+     *   缩放后仍要落在 cx：cx = x' + s' × 内容点
+     *   ⇒ x' = cx − (cx − x) × (s'/s)
+     * 顺序写反缩放就会往一边漂，所以这里把推导写在注释里备查。 */
+    function mindZoomAt(f, cx, cy) {
+        var ns = Math.max(.3, Math.min(3, MZ.s * f));
+        var k = ns / MZ.s;
+        MZ.x = cx - (cx - MZ.x) * k;
+        MZ.y = cy - (cy - MZ.y) * k;
+        MZ.s = ns;
+        mindApply();
+    }
+
+    function mindFit() {
+        var wrap = $('mind'), c = $('mind-canvas');
+        if (!wrap || !c) return;
+        var W = +c.getAttribute('data-w') || 0, H = +c.getAttribute('data-h') || 0;
+        var cw = wrap.clientWidth, ch = wrap.clientHeight;
+        // 视图还没显示出来时 clientHeight 是 0，这时算出来的缩放是 0，
+        // 直接返回等可见后再 fit —— route() 里会补一次。
+        if (!W || !H || cw <= 0 || ch <= 0) return;
+        /* 只按宽度 fit，高度不够就让纵向溢出、顶部对齐。
+         * 为什么不两边一起缩：像「高一 三角函数」这种 24 节点的章节，
+         * 高度是容器的两倍多，两边一起缩会缩到 40%，字全糊成一团；
+         * 按宽度 fit 能保持原始字号，纵向靠拖动看，比看不清强。 */
+        MZ.s = Math.max(.3, Math.min((cw - 24) / W, 1.25));
+        MZ.x = (cw - W * MZ.s) / 2;
+        MZ.y = H * MZ.s + 24 <= ch ? (ch - H * MZ.s) / 2 : 12;
+        mindApply();
+    }
+
+    function mindFullscreen() {
+        var wrap = $('mind');
+        if (!wrap) return;
+        if (document.fullscreenElement) { document.exitFullscreen(); return; }
+        if (wrap.requestFullscreen) wrap.requestFullscreen().catch(function () { toast('这个浏览器不支持全屏'); });
+        else if (wrap.webkitRequestFullscreen) wrap.webkitRequestFullscreen();
+        else toast('这个浏览器不支持全屏');
+    }
+
+    /* 中文按一个字宽算，ASCII 窄一半。
+     * ★ 估算宁可偏宽：算窄了文字会顶出矩形（实测出现过 3 处），
+     *   算宽了只是节点大一点点。所以中文取 12.4 而不是 12，
+     *   左右再各留 12px 内边距。 */
+    function tw(s) {
+        var w = 0;
+        for (var i = 0; i < s.length; i++) w += /[\x00-\xff]/.test(s.charAt(i)) ? 7.2 : 12.4;
+        return w;
+    }
+
     function drawMind() {
-        var box = $('mind');
+        var box = $('mind-canvas');
+        if (!box) return;
         if (!S.chapMapM || !S.chapM) { box.innerHTML = '<div class="empty">暂无数据</div>'; return; }
         var ids = S.chapMapM[S.chapM] || [];
         if (!ids.length) { box.innerHTML = '<div class="empty">该章节暂无知识点</div>'; return; }
@@ -226,95 +301,253 @@
             });
             if (!changed) break;
         }
-
         var byL = {};
         ids.forEach(function (i) { (byL[layer[i]] = byL[layer[i]] || []).push(i); });
         var Ls = Object.keys(byL).map(Number).sort(function (a, b) { return a - b; });
 
-        /* 层内折行：大章节单层摊开会横向拉到几千像素，
-           纵向折行更好读。PER 是每行列数，ROWH 是折出来的行高。 */
-        /* 手机上按 3 列折行：6 列会把图撑到 572px 宽，容器只有 358px，
-           只能横向拖着看。竖着排虽然高一点，但至少是上下滚，不用歪着头拖。 */
+        /* 折行不再固定每行列数，改成「行内累计宽度超过 MAXW 就换行」。
+           固定列数时短名字和长名字占一样宽，留下大片空白；
+           按实际宽度排，一行能塞更多，图也更紧凑。 */
         var narrow = window.innerWidth <= 768;
-        var COL = narrow ? 104 : 128, ROW = 96, ROWH = narrow ? 52 : 58,
-            PER = narrow ? 3 : 6, PAD = 30;
-        var maxN = 0;
-        Ls.forEach(function (L) {
-            var r = Math.ceil(byL[L].length / PER);
-            maxN = Math.max(maxN, Math.min(byL[L].length, PER));
-        });
-        var yoff = {}, acc = 0;
-        Ls.forEach(function (L) {
-            yoff[L] = acc;
-            acc += (Math.ceil(byL[L].length / PER) - 1) * ROWH;
+        var MAXW = narrow ? 320 : 780;
+        var NODE_H = 30, GAPX = 12, ROWH = narrow ? 48 : 54, LGAP = 34, PAD = 46;
+
+        var shortOf = {}, wOf = {};
+        ids.forEach(function (id) {
+            var nm = ((S.graph.byId[id] || {}).name) || id;
+            var s = nm.length > 10 ? nm.slice(0, 10) + '…' : nm;
+            shortOf[id] = s;
+            wOf[id] = Math.max(58, Math.min(140, tw(s) + 26));
         });
 
-        var W = Math.max(maxN * COL, 260) + PAD * 2;
-        var H = Ls.length * ROW + acc + PAD * 2 + 24;
+        var rowsOf = {}, maxW = 0;
+        Ls.forEach(function (L) {
+            var arr = byL[L], rows = [], cur = [], cw = 0;
+            arr.forEach(function (id) {
+                var w = wOf[id];
+                if (cur.length && cw + GAPX + w > MAXW) { rows.push({ items: cur, w: cw }); cur = []; cw = 0; }
+                cur.push(id); cw += (cur.length > 1 ? GAPX : 0) + w;
+            });
+            if (cur.length) rows.push({ items: cur, w: cw });
+            rowsOf[L] = rows;
+            rows.forEach(function (r) { maxW = Math.max(maxW, r.w); });
+        });
+
+        var layerTop = {}, acc = 0;
+        Ls.forEach(function (L) {
+            layerTop[L] = acc;
+            acc += rowsOf[L].length * ROWH + LGAP;
+        });
+        var W = maxW + PAD * 2;
+        var H = acc - LGAP + PAD * 2 + 16;
+
         var pos = {};
         Ls.forEach(function (L) {
-            var arr = byL[L], n = arr.length;
-            var rows = Math.ceil(n / PER);
-            for (var ri = 0; ri < rows; ri++) {
-                var seg = arr.slice(ri * PER, ri * PER + PER);
-                var x0 = (W - seg.length * COL) / 2 + COL / 2;
-                seg.forEach(function (id, i) {
-                    pos[id] = { x: x0 + i * COL, y: PAD + L * ROW + yoff[L] + ri * ROWH + 24 };
+            rowsOf[L].forEach(function (r, ri) {
+                var cx = (W - r.w) / 2;
+                r.items.forEach(function (id) {
+                    var w = wOf[id];
+                    pos[id] = { x: cx + w / 2, w: w, y: PAD + layerTop[L] + ri * ROWH + NODE_H / 2 };
+                    cx += w + GAPX;
                 });
-            }
+            });
         });
 
         // 状态：取最近一条覆盖过该知识点的记录
         var st = {};
         var recs = loadRec();
-        for (var ri = recs.length - 1; ri >= 0; ri--) {
-            var m = recs[ri].states || {};
+        for (var ri2 = recs.length - 1; ri2 >= 0; ri2--) {
+            var m = recs[ri2].states || {};
             Object.keys(m).forEach(function (id) {
                 if (st[id]) return;
                 st[id] = m[id] === 'M' ? 'mastered' : (m[id] === 'W' ? 'weak' : (m[id] === 'S' ? 'shaky' : 'unknown'));
             });
         }
-        var fill = { mastered: '#15803d', shaky: '#b45309', weak: '#b91c1c', unknown: '#c8cfd8' };
-        var opa = { mastered: 1, shaky: 1, weak: 1, unknown: .5 };
 
-        var svg = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H +
-            '" style="max-width:100%;height:auto">' +
-            '<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" ' +
-            'orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor" opacity=".55"></path></marker></defs>';
+        /* 层带：每层垫一个淡色圆角底，层次一眼分得开。
+           相邻层用两套色交替，否则连成一片看不出边界。 */
+        var svg = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">';
+        svg += '<defs>' +
+            '<marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">' +
+            '<path d="M0 0L10 5L0 10z" class="ar-fill"></path></marker>' +
+            '<marker id="arh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">' +
+            '<path d="M0 0L10 5L0 10z" class="ar-fill-hi"></path></marker>' +
+            '</defs>';
 
-        svg += '<g style="color:var(--border-color)">';
+        Ls.forEach(function (L, li) {
+            var top = PAD + layerTop[L] - 16;
+            var h = rowsOf[L].length * ROWH - (ROWH - NODE_H) + 32;
+            svg += '<g class="band' + (li % 2 ? ' b' : '') + '">' +
+                '<rect x="' + (PAD - 26) + '" y="' + top + '" width="' + (W - (PAD - 26) * 2) +
+                '" height="' + h + '" rx="12"></rect>' +
+                '<text class="band-t" x="' + (PAD - 14) + '" y="' + (top + 16) + '">第 ' + (li + 1) + ' 层</text>' +
+                '</g>';
+        });
+
+        svg += '<g class="mlinks">';
         edges.forEach(function (e) {
             var a = pos[e.topicId], b = pos[e.prerequisiteId];
             if (!a || !b) return;
             var my = (a.y + b.y) / 2;
-            svg += '<path class="mlink" d="M' + a.x + ' ' + (a.y - 11) +
-                ' C ' + a.x + ' ' + my + ' ' + b.x + ' ' + my + ' ' + b.x + ' ' + (b.y + 11) +
+            svg += '<path class="mlink" data-a="' + esc(e.topicId) + '" data-b="' + esc(e.prerequisiteId) +
+                '" d="M' + a.x + ' ' + (a.y - NODE_H / 2) +
+                ' C ' + a.x + ' ' + my + ' ' + b.x + ' ' + my + ' ' + b.x + ' ' + (b.y + NODE_H / 2) +
                 '" marker-end="url(#ar)"></path>';
         });
         svg += '</g>';
 
         ids.forEach(function (id) {
-            var p = pos[id], t = S.graph.byId[id];
-            var s = st[id] || 'unknown';
-            var nm = (t && t.name) || id;
-            var short = nm.length > 7 ? nm.slice(0, 7) + '…' : nm;
-            svg += '<g class="mnode" data-id="' + esc(id) + '">' +
-                '<circle cx="' + p.x + '" cy="' + p.y + '" r="9" fill="' + fill[s] +
-                '" opacity="' + opa[s] + '" stroke="var(--bg-primary)" stroke-width="2"></circle>' +
-                '<text x="' + p.x + '" y="' + (p.y + 24) + '" text-anchor="middle">' + esc(short) + '</text>' +
-                '<title>' + esc(nm) + '</title></g>';
+            var p = pos[id], s = st[id] || 'unknown';
+            var x = p.x - p.w / 2, y = p.y - NODE_H / 2;
+            svg += '<g class="mnode ' + s + '" data-id="' + esc(id) + '">' +
+                '<rect x="' + x + '" y="' + y + '" width="' + p.w + '" height="' + NODE_H + '" rx="9"></rect>' +
+                '<text x="' + p.x + '" y="' + (p.y + 4.5) + '" text-anchor="middle">' + esc(shortOf[id]) + '</text>' +
+                '<title>' + esc(((S.graph.byId[id] || {}).name) || id) + '</title></g>';
         });
         svg += '</svg>';
-        box.innerHTML = svg;
 
+        box.innerHTML = svg;
+        box.setAttribute('data-w', W);
+        box.setAttribute('data-h', H);
+        box.classList.remove('picked');
+
+        /* 点一个节点 = 聚焦：它自己加粗，它的直接先修也标出来，
+           其余的压暗。不这么做的话，20 多个节点里根本看不出谁连着谁。 */
+        function mark(id) {
+            var pre = {};
+            (S.deps || []).forEach(function (d) { if (d.topicId === id) pre[d.prerequisiteId] = 1; });
+            box.classList.add('picked');
+            box.querySelectorAll('.mnode').forEach(function (n) {
+                var i = n.getAttribute('data-id');
+                n.classList.toggle('sel', i === id);
+                n.classList.toggle('pre', !!pre[i]);
+            });
+            box.querySelectorAll('.mlink').forEach(function (p) {
+                var on = p.getAttribute('data-a') === id || p.getAttribute('data-b') === id;
+                p.classList.toggle('hi', on);
+                p.setAttribute('marker-end', on ? 'url(#arh)' : 'url(#ar)');
+            });
+        }
         box.querySelectorAll('.mnode').forEach(function (g) {
             g.onclick = function () {
                 var id = g.getAttribute('data-id');
                 var t = S.graph.byId[id];
+                mark(id);
                 var pre = (S.deps || []).filter(function (d) { return d.topicId === id; })
                     .map(function (d) { return (S.graph.byId[d.prerequisiteId] || {}).name || d.prerequisiteId; });
                 toast((t ? t.name : id) + (pre.length ? '　需要先会：' + pre.slice(0, 3).join('、') : '　没有先修'));
             };
+        });
+
+        mindFit();
+    }
+
+    /* 缩放 / 平移 / 全屏的交互，只绑一次，重绘导图不重复绑。
+     *
+     * ★ 为什么在节点上按下也能拖画布：
+     *   按下后移动了就是想拖，没怎么动就松手才算点节点。
+     *   所以拖拽不拦 pointerdown，而是在 click 的捕获阶段按位移吃掉它。 */
+    function bindMindView() {
+        var wrap = $('mind');
+        if (!wrap || wrap.getAttribute('data-bound')) return;
+        wrap.setAttribute('data-bound', '1');
+
+        var drag = false, cap = false, sx = 0, sy = 0, ox = 0, oy = 0, moved = 0;
+
+        /* ★ 为什么不在 pointerdown 里就 setPointerCapture：
+         *   一旦捕获，后续 click 也会被派发到捕获元素（wrap），
+         *   节点自己的 onclick 就再也收不到 —— 表现是「点节点没反应」。
+         *   所以改成真的开始拖了（位移 > 4px）才捕获：
+         *   纯点击不捕获，click 正常落到节点上；真拖动才接管后续事件，
+         *   这样指针移到画布外也不会丢 pointerup。 */
+        wrap.addEventListener('pointerdown', function (e) {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            /* moved 必须先清零：点控制条上的按钮时 pointerdown 也会冒泡到这里，
+               不清零的话上一次拖拽留下的位移会把这次 click 一起吃掉，
+               表现是「有时按钮点了没反应」——很难复现的那种。 */
+            moved = 0;
+            if (e.target.closest && e.target.closest('.mind-ctrl')) return;
+            drag = true; cap = false;
+            sx = e.clientX; sy = e.clientY; ox = MZ.x; oy = MZ.y;
+        });
+        wrap.addEventListener('pointermove', function (e) {
+            if (!drag) return;
+            var dx = e.clientX - sx, dy = e.clientY - sy;
+            moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
+            if (!cap) {
+                if (moved <= 4) return;          // 手抖的几像素先不动，点击手感更稳
+                cap = true;
+                try { wrap.setPointerCapture(e.pointerId); } catch (err) {}
+                wrap.classList.add('grabbing');
+            }
+            MZ.x = ox + dx; MZ.y = oy + dy;
+            mindApply();
+        });
+        function endDrag(e) {
+            if (!drag) return;
+            drag = false;
+            wrap.classList.remove('grabbing');
+            if (cap) { try { wrap.releasePointerCapture(e.pointerId); } catch (err) {} }
+            cap = false;
+        }
+        wrap.addEventListener('pointerup', endDrag);
+        wrap.addEventListener('pointercancel', endDrag);
+        wrap.addEventListener('click', function (e) {
+            if (moved > 6) { e.stopPropagation(); e.preventDefault(); }
+        }, true);
+
+        wrap.addEventListener('wheel', function (e) {
+            e.preventDefault();
+            var r = wrap.getBoundingClientRect();
+            mindZoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX - r.left, e.clientY - r.top);
+        }, { passive: false });
+
+        // 双指捏合：pointer 事件拿不到第二根手指，只能单独听 touch
+        var pinch = null;
+        wrap.addEventListener('touchstart', function (e) {
+            if (e.touches.length !== 2) return;
+            drag = false;
+            var a = e.touches[0], b = e.touches[1], r = wrap.getBoundingClientRect();
+            pinch = {
+                d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1,
+                s: MZ.s,
+                cx: (a.clientX + b.clientX) / 2 - r.left,
+                cy: (a.clientY + b.clientY) / 2 - r.top
+            };
+        }, { passive: true });
+        wrap.addEventListener('touchmove', function (e) {
+            if (!pinch || e.touches.length !== 2) return;
+            e.preventDefault();
+            var a = e.touches[0], b = e.touches[1];
+            var d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1;
+            var want = Math.max(.3, Math.min(3, pinch.s * (d / pinch.d)));
+            mindZoomAt(want / MZ.s, pinch.cx, pinch.cy);
+        }, { passive: false });
+        wrap.addEventListener('touchend', function () { pinch = null; }, { passive: true });
+
+        wrap.addEventListener('dblclick', function (e) {
+            var r = wrap.getBoundingClientRect();
+            mindZoomAt(1.6, e.clientX - r.left, e.clientY - r.top);
+        });
+
+        var w = wrap.clientWidth, h = wrap.clientHeight;
+        var zin = $('m-in'), zout = $('m-out'), zfit = $('m-fit'), zfs = $('m-fs');
+        if (zout) zout.onclick = function () { mindZoomAt(1 / 1.25, wrap.clientWidth / 2, wrap.clientHeight / 2); };
+        if (zin) zin.onclick = function () { mindZoomAt(1.25, wrap.clientWidth / 2, wrap.clientHeight / 2); };
+        if (zfit) zfit.onclick = mindFit;
+        if (zfs) zfs.onclick = mindFullscreen;
+
+        document.addEventListener('fullscreenchange', function () {
+            var on = document.fullscreenElement === wrap;
+            wrap.classList.toggle('fs', on);
+            if (zfs) zfs.classList.toggle('on', on);
+            setTimeout(mindFit, 80);
+        });
+        document.addEventListener('keydown', function (e) {
+            if (document.fullscreenElement !== wrap) return;
+            if (e.key === '+' || e.key === '=') mindZoomAt(1.25, wrap.clientWidth / 2, wrap.clientHeight / 2);
+            else if (e.key === '-' || e.key === '_') mindZoomAt(1 / 1.25, wrap.clientWidth / 2, wrap.clientHeight / 2);
+            else if (e.key === '0') mindFit();
         });
     }
 
@@ -393,7 +626,14 @@
     function route() {
         var v = hashView();
         if (v === 'records') { renderRecords(); view('v-records'); return; }
-        if (v === 'mind') { if (!S.chapMapM) mindFill('subj'); view('v-mind'); return; }
+        if (v === 'mind') {
+            if (!S.chapMapM) mindFill('subj');
+            view('v-mind');
+            /* 必须等 view() 之后：视图还是 display:none 时 clientHeight 是 0，
+               mindFit 算不出缩放会直接返回，图会停在 0 倍上 */
+            mindFit();
+            return;
+        }
         if (v === 'account') { renderAccount(); view('v-account'); return; }
         // 只有没处在答题/报告中途时才回首页，否则会打断流程
         var inQuiz = $('v-quiz').classList.contains('on');
@@ -947,7 +1187,7 @@
         window.addEventListener('resize', function () {
             clearTimeout(rzT);
             rzT = setTimeout(function () {
-                if ($('v-mind').classList.contains('on')) drawMind();
+                if ($('v-mind').classList.contains('on')) { drawMind(); mindFit(); }
             }, 200);
         });
 
@@ -961,6 +1201,7 @@
         $('m-subj').onchange = function () { S.subjM = this.value; S.gradeM = null; mindFill('subj'); };
         $('m-grade').onchange = function () { S.gradeM = Number(this.value); mindFill('grade'); };
         $('m-chap').onchange = function () { S.chapM = this.value; drawMind(); };
+        bindMindView();
 
         // 账号
         $('ac-name').oninput = function () { setName(this.value.trim() || '学习者'); };

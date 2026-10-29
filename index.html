@@ -165,7 +165,25 @@
           <span><i class="d weak"></i>薄弱</span>
           <span><i class="d unknown"></i>未测</span>
         </div>
-        <div class="mind-wrap" id="mind"></div>
+        <div class="mind-wrap" id="mind">
+          <div class="mind-canvas" id="mind-canvas"></div>
+          <div class="mind-hint">滚轮缩放 · 拖动平移 · 双击放大 · 点节点看先修</div>
+          <div class="mind-ctrl">
+            <button class="mc" id="m-out" type="button" aria-label="缩小" title="缩小">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg>
+            </button>
+            <span class="mc-zoom" id="mind-zoom">100%</span>
+            <button class="mc" id="m-in" type="button" aria-label="放大" title="放大">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>
+            </button>
+            <span class="mc-sep"></span>
+            <button class="mc wide" id="m-fit" type="button" title="适应窗口">适应</button>
+            <button class="mc wide" id="m-fs" type="button" title="全屏">
+              <svg class="i-fs" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5"></path><path d="M20 9V4h-5"></path><path d="M4 15v5h5"></path><path d="M20 15v5h-5"></path></svg>
+              <svg class="i-ex" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4"></path><path d="M15 4v5h5"></path><path d="M9 20v-5H4"></path><path d="M15 20v-5h5"></path></svg>
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- 账号 -->

@@ -43,6 +43,12 @@
   --bad-soft: #fdeceb;
   --untested: #c8cfd8;
 
+  /* 导图专用：层带底色与连线色 */
+  --band-a: #fbfcfd;
+  --band-b: #f1f5f9;
+  --band-line: #e4eaf1;
+  --edge: #b6bfc9;
+
   --t-3: .18s;
   --t-4: .28s;
   --hm-std: cubic-bezier(.4, 0, .2, 1);
@@ -75,6 +81,10 @@ body.dark-mode {
   --bad: #f85149;
   --bad-soft: #2b1618;
   --untested: #30363d;
+  --band-a: #12181f;
+  --band-b: #1a212a;
+  --band-line: #262e38;
+  --edge: #3d4650;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -522,27 +532,135 @@ body.dark-mode .sub.on .badge { background: rgba(255, 255, 255, .08); color: var
 .mind-legend .d.unknown { background: var(--untested); }
 
 .mind-wrap {
+  position: relative;
+  height: clamp(320px, 58vh, 640px);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
   background: var(--bg-secondary);
-  overflow: auto;
-  padding: 8px;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
-.mind-wrap svg { display: block; }
+.mind-wrap.grabbing { cursor: grabbing; }
+.mind-wrap:fullscreen { height: 100vh; border-radius: 0; border: 0; }
+.mind-wrap.fs { height: 100vh; border-radius: 0; border: 0; }
+
+/* 画布层：缩放平移都在这层的 transform 上，SVG 自己永远保持原始尺寸 */
+.mind-canvas {
+  transform-origin: 0 0;
+  will-change: transform;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+.mind-canvas svg { display: block; }
+
+/* 层带：相邻层两套色交替，否则连成一片看不出边界 */
+.band rect {
+  fill: var(--band-a);
+  stroke: var(--band-line);
+  stroke-width: 1;
+}
+.band.b rect { fill: var(--band-b); }
+.band-t { font-size: 11px; fill: var(--text-tertiary); }
+
+/* 连线 */
+.mlink {
+  stroke: var(--edge);
+  stroke-width: 1.6;
+  fill: none;
+  transition: stroke var(--t-3) var(--hm-std), opacity var(--t-3) var(--hm-std);
+}
+.mlink.hi { stroke: var(--accent-color); stroke-width: 2.4; }
+.ar-fill { fill: var(--edge); }
+.ar-fill-hi { fill: var(--accent-color); }
+
+/* 节点：圆角矩形 + 语义色描边，不再是一个个灰圆点 */
 .mnode { cursor: pointer; }
-.mnode circle { transition: stroke-width .15s; }
-.mnode:hover circle { stroke-width: 3; }
-.mnode text { font-size: 11px; fill: var(--text-primary); }
-.mlink { stroke: var(--border-color); stroke-width: 1.5; fill: none; }
-.mind-tip {
-  position: fixed; z-index: 150;
-  background: var(--text-primary); color: var(--bg-primary);
-  padding: 8px 12px; border-radius: var(--radius-md);
-  font-size: 12px; max-width: 260px; line-height: 1.5;
-  pointer-events: none; opacity: 0;
-  transition: opacity var(--t-3) var(--hm-std);
+.mnode rect {
+  stroke-width: 1.5;
+  transition: stroke-width .15s, opacity var(--t-3) var(--hm-std);
 }
-.mind-tip.on { opacity: 1; }
+.mnode text {
+  font-size: 12px;
+  font-weight: 500;
+  pointer-events: none;
+}
+.mnode.mastered rect { fill: var(--ok-soft); stroke: var(--ok); }
+.mnode.mastered text { fill: var(--ok); }
+.mnode.shaky rect { fill: var(--warn-soft); stroke: var(--warn); }
+.mnode.shaky text { fill: var(--warn); }
+.mnode.weak rect { fill: var(--bad-soft); stroke: var(--bad); }
+.mnode.weak text { fill: var(--bad); }
+.mnode.unknown rect { fill: var(--bg-primary); stroke: var(--border-color); }
+.mnode.unknown text { fill: var(--text-secondary); }
+.mnode:hover rect { stroke-width: 2.5; }
+.mnode.sel rect { stroke-width: 3; }
+.mnode.pre rect { stroke-width: 2.5; }
+
+/* 点选后：无关节点压暗，聚焦关系才看得出来 */
+.mind-canvas.picked .mnode:not(.sel):not(.pre) { opacity: .42; }
+.mind-canvas.picked .mlink:not(.hi) { opacity: .3; }
+
+/* 控制条 */
+.mind-ctrl {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(31, 35, 40, .12);
+}
+.mc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--t-3) var(--hm-std), color var(--t-3) var(--hm-std);
+}
+.mc:hover { background: var(--bg-hover); color: var(--text-primary); }
+.mc.on { color: var(--accent-color); background: var(--accent-light); }
+.mc-zoom {
+  min-width: 46px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.mc-sep { width: 1px; height: 18px; background: var(--border-light); margin: 0 3px; }
+#m-fs .i-ex { display: none; }
+#m-fs.on .i-ex { display: block; }
+#m-fs.on .i-fs { display: none; }
+
+.mind-hint {
+  position: absolute;
+  left: 12px;
+  bottom: 16px;
+  z-index: 2;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+@media (max-width: 768px) {
+  .mind-wrap { height: clamp(300px, 52vh, 520px); }
+  .mind-hint { display: none; }
+}
 
 /* ===== 账号 ===== */
 .ac-row { display: flex; align-items: center; gap: 16px; }

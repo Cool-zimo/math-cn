@@ -133,22 +133,60 @@
         });
     }
 
+    /* 错误分类：给 UI 用，不同 kind 给不同的可操作提示。
+     * 「格式不对」和「被截断」对用户的意义完全不同 ——
+     *   前者是"你点错了"，后者是"链接是好的但没复制全"。 */
+    function shareError(message, kind) {
+        var e = new Error(message);
+        e.kind = kind || 'corrupt';
+        return e;
+    }
+
+    /* 聊天软件会往链接后面挂东西：?from=singlemessage、&isappinstalled=0、
+     * 中文或英文标点（转发时对方加的句号/括号/逗号）、复制时带上的空格。
+     * 报告码只可能是 base64url 字符，遇到这些一律当尾巴切掉。 */
+    function cleanCode(str) {
+        return String(str == null ? '' : str)
+            .trim()
+            // base64url 只可能是 [A-Za-z0-9_-]，所以 ? & # 一定是尾巴，从第一个起全切
+            .replace(/[?&#].*$/, '')
+            .replace(/[，。、；：,）】》”’！\s]+$/, '');  // 中英文标点尾巴
+    }
+
+    /* ★★ 关键：decode 必须【永远】返回 promise，绝不能同步 throw。
+     *
+     *   以前这里是同步 throw('链接格式不对')，而调用方写的是
+     *     ShareCode.decode(code).then(...).catch(...)
+     *   —— 同步抛出时 .then 根本没机会挂上，catch 自然接不住，
+     *     错误一路冒泡到 init()，被显示成「题库加载失败：链接格式不对」。
+     *   既掩盖了真实原因，还误导用户去查网络（离线也必然复现）。
+     *
+     *   所以外层包一个已 resolved 的 promise：
+     *   同步 throw 一律转成 rejection，调用方的 .catch 才接得住。 */
     function decode(str) {
-        str = String(str || '').trim();
-        var m = /^(R1)(c|p)\.(.+)$/.exec(str);
-        if (!m) throw new Error('链接格式不对');
+        return Promise.resolve().then(function () { return decodeSync(str); });
+    }
+
+    function decodeSync(str) {
+        str = cleanCode(str);
+        if (!str) throw shareError('链接里没有报告码', 'format');
+        var m = /^(R1)([cp])\.(.+)$/.exec(str);
+        if (!m) throw shareError('这不像一个报告链接', 'format');
+        if (!/^[A-Za-z0-9_-]+$/.test(m[3])) {
+            throw shareError('链接里有非法字符，可能在转发时被转义了', 'corrupt');
+        }
         var body = b64urlToBytes(m[3]);
 
         function parse(u8) {
             var s = new TextDecoder().decode(u8);
             var dot = s.indexOf('.');
-            if (dot < 0) throw new Error('链接内容损坏');
+            if (dot < 0) throw shareError('链接内容损坏', 'corrupt');
             var mac = s.slice(0, dot), payload = s.slice(dot + 1);
             // ★ 校验位对不上 = 链接被截断或被转义坏了。
             //   这时"猜着解析"会出一份缺数据的报告，宁可直接报错。
-            if (sum(payload) !== mac) throw new Error('链接不完整，可能被聊天软件截断');
+            if (sum(payload) !== mac) throw shareError('链接不完整，可能被聊天软件截断', 'truncated');
             var f = payload.split('~');
-            if (f.length < 10) throw new Error('链接内容损坏');
+            if (f.length < 10) throw shareError('链接内容损坏', 'corrupt');
             var states = {};
             if (f[9]) {
                 f[9].split(',').forEach(function (kv) {
@@ -166,14 +204,16 @@
             };
         }
 
-        if (m[2] === 'p') return Promise.resolve(parse(body));
+        // 不压缩分支：parse 本身会同步 throw，但整个 decodeSync
+        // 已经跑在 promise 里了，同步 throw 会被转成 rejection，安全。
+        if (m[2] === 'p') return parse(body);
         if (typeof DecompressionStream === 'undefined') {
-            return Promise.reject(new Error('当前浏览器不支持解压，请更新浏览器'));
+            throw shareError('当前浏览器不支持解压，请更新浏览器', 'unsupported');
         }
         return inflate(body).then(function (u8) {
             // 解压不出来 ≠ 浏览器不行。能到这一步说明 API 是有的，
             // 那就是数据本身坏了 —— 别把「链接被截断」说成「你浏览器太旧」。
-            if (!u8) throw new Error('链接内容损坏，可能被聊天软件截断或转义');
+            if (!u8) throw shareError('链接内容损坏，可能被聊天软件截断或转义', 'truncated');
             return parse(u8);
         });
     }

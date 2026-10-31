@@ -601,20 +601,29 @@
             fetch('data/topics.json').then(function (r) { return r.json(); }),
             fetch('data/dependencies.json').then(function (r) { return r.json(); })
         ];
+        /* ★ 题库加载 和 打开报告 必须分开兜错误。
+         *   以前两者共用最外层一个 catch，结果报告码坏了也会被说成
+         *   「题库加载失败：链接格式不对 / 请检查网络后刷新」——
+         *   真实原因被盖掉，还把用户引去查网络（而这事离线也必然发生）。
+         *   现在题库这一段自己收口，下面的 catch 只会是题库真没取到。 */
         Promise.all(loads).then(function (a) {
             S.topics = a[0];
             S.deps = a[1];
             S.graph = E.buildGraph(a[0], a[1]);
             recBadge();
             paintUser();
-            // 报告链接优先：带着 #r/xxx 进来的人要看的是报告
-            if (code) { return openShared(code); }
-            renderHome();
-            restoreLast();
-            route();
+            return true;
         }).catch(function (e) {
             $('v-load').innerHTML = '<div class="empty">题库加载失败：' + esc(e.message) +
                 '<br><br>请检查网络后刷新。</div>';
+            return false;
+        }).then(function (loaded) {
+            if (!loaded) return;
+            // 报告链接优先：带着 #r/xxx 进来的人要看的是报告
+            if (code) { openShared(code); return; }
+            renderHome();
+            restoreLast();
+            route();
         });
     }
 
@@ -1134,21 +1143,35 @@
         });
     }
 
+    /* 不同失败原因给不同的可操作提示 ——
+     * 「格式不对」是点错了，「被截断」是链接没复制全，用户要做的事完全不同。 */
+    var SHARE_HINT = {
+        format: '请确认打开的是完整的报告链接（以 #r/R1 开头）。',
+        truncated: '链接很可能在转发时被截断了。请回到原始消息，重新复制整条链接。',
+        corrupt: '链接内容损坏或被转义了。请重新复制一次原始链接。',
+        unsupported: '当前浏览器不支持解压，请更新浏览器后重试。'
+    };
+
     function openShared(code) {
         return window.ShareCode.decode(code).then(function (rep) {
             S.shared = rep;
             renderReport(rep, null, true);
         }).catch(function (e) {
+            var hint = SHARE_HINT[e && e.kind] || '';
             $('report').innerHTML = '<div class="empty" style="padding:80px 20px">' +
                 '<div style="margin-bottom:14px;color:var(--text-tertiary)">' +
                 '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
                 '<path d="M10 13a5 5 0 0 0 7.5.5l3-3A5 5 0 0 0 13.5 3.5L11.8 5.2"></path>' +
                 '<path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"></path></svg></div>' +
                 '<div style="font-size:16px;font-weight:600;color:var(--text-primary);margin-bottom:8px">这份报告打不开</div>' +
-                '<div>' + esc(e.message) + '</div>' +
+                '<div>' + esc(e && e.message) + '</div>' +
+                (hint ? '<div style="margin-top:10px;color:var(--text-tertiary)">' + esc(hint) + '</div>' : '') +
                 '<div style="margin-top:24px"><button class="btn sm ghost" id="r-mine">自己去测一个</button></div></div>';
             view('v-report');
-            $('r-mine').onclick = function () { location.hash = ''; renderHome(); view('v-home'); };
+            // 兜一层：按钮万一不在（视图结构变了），别让这里再抛出去，
+            // 否则错误又会被上游当成别的问题显示。
+            var b = $('r-mine');
+            if (b) b.onclick = function () { location.hash = ''; renderHome(); view('v-home'); };
         });
     }
 
